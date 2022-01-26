@@ -60,7 +60,7 @@ def getSecrets(inpParamSecretName):
     );
 
 
-    #-- AWS Secret Version -1 means Latest Version of the Secret -- #
+    #-- AWS Secret Version -1, means Latest Version of the Secret -- #
 
     if JobVarAWSServiceVersion == '-1':
       vGetSecretReponse=client.get_secret_value(SecretId=vServiceName);
