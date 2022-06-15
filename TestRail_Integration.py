@@ -8,12 +8,10 @@ from snowflake.sqlalchemy import URL
 import sys
 import traceback
 from TestRailCredentials import (User,Password,Host,Database,Schema,Warehouse,Role,TestrailUser,TestrailPassword)
+from TestRailConfigs import (SuiteColumns,CaseColumns,ProjectId,CohesityTestRailBaseURL,ConfigNoOfSuites,APILimit,SnowflakeSuiteTable,SnowflakeCaseTable)
 
 def CreateDBConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole):
 
-	####################################################################################
-	#############Creates a Connection Instance to the Snowflake Server##################
-	####################################################################################
     global vGlobalErrorMessage;
 
     try:
@@ -79,38 +77,27 @@ def getSuites():
             'Authorization': 'Basic '+vAuth
             };
 
-        vDataURL="https://cohesity.testrail.com/index.php?/api/v2/get_suites/4";
-
+        vDataURL=CohesityTestRailBaseURL+"get_suites/"+str(ProjectId);
         requestDataURL=rqst.get(vDataURL,headers=vDataHeadersConfig,verify=False);
-
-        #print("List Of Suites");
-
         outputData=requestDataURL.json();
-        #print(len(outputData));
         vCount=0;
 
-        vColumns = ['id', 'name', 'project_id','is_master','is_baseline','is_completed','completed_on','url'];
+        vColumns = SuiteColumns;
         vLoopSuitesList=[];
 
         for vLoopSuite in outputData:
 
-            #print(vLoopSuite);
-            vLoopSuitesList.append([
-                                vLoopSuite.get('id'),
-                                vLoopSuite.get('name'),
-                                vLoopSuite.get('project_id'),
-                                vLoopSuite.get('is_master'),
-                                vLoopSuite.get('is_baseline'),
-                                vLoopSuite.get('is_completed'),
-                                vLoopSuite.get('completed_on'),
-                                vLoopSuite.get('url'),
-                                ]);
+            vLoopCurrList=[];
+            for j in vColumns:
+                vLoopCurrList.append(vLoopSuite.get(j));
+
+            vLoopSuitesList.append(vLoopCurrList);
+
             vCount+=1;
-            if (vCount > 5000):
+            if (vCount > ConfigNoOfSuites):
                 break;
 
         dfSuites = pd.DataFrame(vLoopSuitesList,columns=vColumns);
-        #print(dfSuites);
 
         return dfSuites;
 
@@ -136,15 +123,9 @@ def getCases(vInpDFSuiteList):
             'Authorization': 'Basic '+vAuth
             };
 
-        vDataURL="https://cohesity.testrail.com/index.php?/api/v2/get_cases/4";
-
         vCaseCount=0;
         vListCases=[];
-        vColumns = ['id','title','section_id','type_id','priority_id','created_on','updated_on','suite_id','milestone_id','is_frontend_tc'
-        ,'custom_automation_status','custom_added_in_release','custom_is_regression','custom_squad_name','custom_automation_owner'
-        ,'custom_tc_added_to_train','custom_automation_target_date','custom_automated_test_case_name','custom_customer_found'
-        ,'custom_is_dmaas','display_order','estimate','estimate_forecast','is_deleted','custom_customer_found_defect_id','custom_automation_type'
-        ];
+        vColumns = CaseColumns;
 
         for index,record in vInpDFSuiteList.iterrows():
             print(record['id']);
@@ -152,7 +133,7 @@ def getCases(vInpDFSuiteList):
 
             while (True):
 
-                vDataURL="https://cohesity.testrail.com/index.php?/api/v2/get_cases/4";
+                vDataURL=CohesityTestRailBaseURL+"get_cases/"+str(ProjectId);
                 vDataParams={
                     'suite_id' : record['id'],
                     'limit' : vLimit,
@@ -163,40 +144,13 @@ def getCases(vInpDFSuiteList):
                 outputData=requestDataURL.json();
                 vCaseCount=vCaseCount+len(outputData.get('cases'));
 
-                #print(outputData.get('cases'));
-
                 for idx,val in enumerate(outputData.get('cases')):
-                    #print(val);
-                    vListCases.append([
-                                        val.get('id'),
-                                        val.get('title'),
-                                        val.get('section_id'),
-                                        val.get('type_id'),
-                                        val.get('priority_id'),
-                                        val.get('created_on'),
-                                        val.get('updated_on'),
-                                        val.get('suite_id'),
-                                        val.get('milestone_id'),
-                                        val.get('is_frontend_tc'),
-                                        val.get('custom_automation_status'),
-                                        val.get('custom_added_in_release'),
-                                        val.get('custom_is_regression'),
-                                        val.get('custom_squad_name'),
-                                        val.get('custom_automation_owner'),
-                                        val.get('custom_tc_added_to_train'),
-                                        val.get('custom_automation_target_date'),
-                                        val.get('custom_automated_test_case_name'),
-                                        val.get('custom_customer_found'),
-                                        val.get('custom_is_dmaas'),
-                                        val.get('display_order'),
-                                        val.get('estimate'),
-                                        val.get('estimate_forecast'),
-                                        val.get('is_deleted'),
-                                        val.get('custom_customer_found_defect_id'),
-                                        val.get('custom_automation_type')
-                                        ]);
 
-                    #vListCases.append(list(val.values()));
+                    vLoopCurrList=[];
+                    for j in vColumns:
+                        vLoopCurrList.append(val.get(j));
+
+                    vListCases.append(vLoopCurrList);
 
                 if (outputData.get('size') < vLimit):
                     break;
@@ -247,7 +201,7 @@ if __name__=='__main__':
         'ascii'
         ).strip();
 
-    vLimit=250;
+    vLimit=APILimit;
 
 	################# Hardcoded #################################
     print("--Get Suites API Called--");
@@ -255,7 +209,7 @@ if __name__=='__main__':
     print("--Get Suites API Finished--");
 
     print("--Suites Load to Snowflake Started--");
-    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,'TESTRAIL_SUITES',vDFSuiteList);
+    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeSuiteTable,vDFSuiteList);
     print("--Suites Load to Snowflake Finished--");
 
     print("--Get Cases API Called--");
@@ -263,5 +217,5 @@ if __name__=='__main__':
     print("--Get Cases API Finished--");
 
     print("--Cases Load to Snowflake Started--");
-    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,'TESTRAIL_CASES',vDFCaseList);
+    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeCaseTable,vDFCaseList);
     print("--Cases Load to Snowflake Finished--");
