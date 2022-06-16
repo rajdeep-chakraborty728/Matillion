@@ -219,3 +219,5 @@ if __name__=='__main__':
     print("--Cases Load to Snowflake Started--");
     LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeCaseTable,vDFCaseList);
     print("--Cases Load to Snowflake Finished--");
+
+	
