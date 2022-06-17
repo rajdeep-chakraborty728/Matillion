@@ -46,11 +46,20 @@ ProjectId=4;
 #Test Rail Public Configurations
 CohesityTestRailBaseURL='https://cohesity.testrail.com/index.php?/api/v2/';
 APILimit=250;
+TestRailEPochDate=1000000000;
 
 #No Of Suites to Fetch Data from Testrail
-ConfigNoOfSuites=2000;
+ConfigNoOfSuites=5;
 
 
 # Snowflake Table Names
 SnowflakeSuiteTable='TESTRAIL_SUITES';
 SnowflakeCaseTable='TESTRAIL_CASES';
+
+
+# Snowflake Object Mapping
+SnowflakeObjectMapping={
+                        'Suites': [1,'TESTRAIL_SUITES'],
+                        'Cases': [2,'TESTRAIL_CASES','UPDATED_ON'],
+                        'HighWatermark':['MATILLION_TEMP','TESTRAIL_HIGHWATERMARK']
+                        };
