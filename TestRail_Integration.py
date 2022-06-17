@@ -5,12 +5,40 @@ import datetime
 import pandas as pd
 from sqlalchemy import create_engine
 from snowflake.sqlalchemy import URL
+import snowflake.connector
+import snowflake.connector.errors
 import sys
 import traceback
 from TestRailCredentials import (User,Password,Host,Database,Schema,Warehouse,Role,TestrailUser,TestrailPassword)
-from TestRailConfigs import (SuiteColumns,CaseColumns,ProjectId,CohesityTestRailBaseURL,ConfigNoOfSuites,APILimit,SnowflakeSuiteTable,SnowflakeCaseTable)
+from TestRailConfigs import (SuiteColumns,CaseColumns,ProjectId,CohesityTestRailBaseURL,ConfigNoOfSuites,APILimit,SnowflakeObjectMapping,TestRailEPochDate)
 
-def CreateDBConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole):
+snowflake.connector.paramstyle='qmark';
+
+def CreateSnowflakeConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole):
+
+    global vGlobalErrorMessage;
+
+    try:
+
+        ctx = snowflake.connector.connect(
+            user=vUser,
+            password=vPassword,
+          	role=vRole,
+            account=vHost,
+            warehouse=vWarehouse,
+            database=vDatabase
+        );
+
+        return ctx;
+
+    except:
+
+        vGlobalErrorMessage=traceback.format_exc();
+        print("Exception Encountered");
+        print(vGlobalErrorMessage);
+        exit(0);
+
+def CreateSnowflakeAlchemyDBConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole):
 
     global vGlobalErrorMessage;
 
@@ -37,13 +65,122 @@ def CreateDBConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole)
         print(vGlobalErrorMessage);
         exit(0);
 
+def getHighWatermark(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,vInputObject,SnowflakeObjectMapping):
+
+    global vGlobalErrorMessage;
+    global vMinEpochTime;
+
+    try:
+
+        vSFSchema=SnowflakeObjectMapping.get('HighWatermark')[0];
+        vSFObject=SnowflakeObjectMapping.get('HighWatermark')[1];
+        vObjectID=SnowflakeObjectMapping.get(vInputObject)[0];
+
+
+        vConnection=CreateSnowflakeConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole);
+        vCursor=vConnection.cursor();
+
+        vQuery="""SELECT
+                    COUNT(1) AS CNT
+                FROM """+vSFSchema+"""."""+vSFObject+"""
+                WHERE 1=1 AND OBJ_ID=?
+                """;
+
+        vCursor.execute(vQuery,[vObjectID]);
+
+        vCountARR=vCursor.fetchone();
+        vCount=vCountARR[0];
+
+        vRet=-1;
+
+        if (vCount == 0):
+            vRet=vMinEpochTime;
+
+        else:
+
+            vQuery="""SELECT
+                        NVL(UPDATED_ON,"""+str(vMinEpochTime)+""") AS UPDATED_ON
+                    FROM """+vSFSchema+"""."""+vSFObject+"""
+                    WHERE 1=1 AND OBJ_ID=?
+                    """;
+
+            vCursor.execute(vQuery,[vObjectID]);
+
+            vUpdatedOnARR=vCursor.fetchone();
+            vRet=vUpdatedOnARR[0];
+
+        vConnection.close();
+        vCursor.close();
+
+        print("High Watermark For Object "+vInputObject+" Is "+str(vRet));
+        return vRet+1;
+
+    except:
+        vGlobalErrorMessage=traceback.format_exc();
+        print("Exception Encountered");
+        print(vGlobalErrorMessage);
+        exit(0);
+
+def insertHighWatermark(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,vInputObject,SnowflakeObjectMapping):
+
+    global vGlobalErrorMessage;
+
+    try:
+
+        vSFSchema=SnowflakeObjectMapping.get('HighWatermark')[0];
+        vSFObject=SnowflakeObjectMapping.get('HighWatermark')[1];
+
+        vObjectID=SnowflakeObjectMapping.get(vInputObject)[0];
+        vSFObjectTable=SnowflakeObjectMapping.get(vInputObject)[1];
+        vHWMColumn=SnowflakeObjectMapping.get(vInputObject)[2];
+
+        vConnection=CreateSnowflakeConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole);
+        vCursor=vConnection.cursor();
+
+        vQuery="""SELECT MAX("""+vHWMColumn+""") FROM """+vSchema+"""."""+vSFObjectTable;
+        vCursor.execute(vQuery);
+
+        vHWMARR=vCursor.fetchone();
+        vHWM=vHWMARR[0];
+
+
+        vQuery="""DELETE FROM """+vSFSchema+"""."""+vSFObject+"""
+                WHERE 1=1 AND OBJ_ID = ? """;
+
+        vCursor.execute(vQuery,[vObjectID]);
+
+        vQuery="""INSERT INTO """+vSFSchema+"""."""+vSFObject+"""
+                (
+                    OBJ_ID,
+                    OBJ_NM,
+                    TBL_NM,
+                    UPDATED_ON
+                )
+                SELECT
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                """;
+
+        vCursor.execute(vQuery,[vObjectID,vInputObject,vSFObjectTable,vHWM]);
+
+        vConnection.close();
+        vCursor.close();
+
+    except:
+        vGlobalErrorMessage=traceback.format_exc();
+        print("Exception Encountered");
+        print(vGlobalErrorMessage);
+        exit(0);
+
 def LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,vSnowFlakeTable,vDataFrame):
 
     global vGlobalErrorMessage;
 
     try:
 
-        vConnectionEngine=CreateDBConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole);
+        vConnectionEngine=CreateSnowflakeAlchemyDBConnection(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole);
         vConnection=vConnectionEngine.connect();
         vQuery='DROP TABLE IF EXISTS "'+vSchema+'"."'+vSnowFlakeTable+'"';
         vConnection.execute(vQuery);
@@ -108,7 +245,7 @@ def getSuites():
         print(vGlobalErrorMessage);
         exit(0);
 
-def getCases(vInpDFSuiteList):
+def getCases(vInpDFSuiteList,vHWM):
 
     global vTestrailUser;
     global vTestrailPassword;
@@ -136,12 +273,17 @@ def getCases(vInpDFSuiteList):
                 vDataURL=CohesityTestRailBaseURL+"get_cases/"+str(ProjectId);
                 vDataParams={
                     'suite_id' : record['id'],
+                    'updated_after' : vHWM,
                     'limit' : vLimit,
                     'offset' : vCount
                     };
 
                 requestDataURL=rqst.get(vDataURL,headers=vDataHeadersConfig,params=vDataParams,verify=False);
                 outputData=requestDataURL.json();
+
+                if (outputData.get('cases') is None):
+                    break;
+
                 vCaseCount=vCaseCount+len(outputData.get('cases'));
 
                 for idx,val in enumerate(outputData.get('cases')):
@@ -182,6 +324,7 @@ if __name__=='__main__':
     global vTestrailPassword;
     global vLimit;
     global vAuth;
+    global vMinEpochTime;
 
     vUser=User;
     vPassword=Password;
@@ -202,6 +345,7 @@ if __name__=='__main__':
         ).strip();
 
     vLimit=APILimit;
+    vMinEpochTime=TestRailEPochDate;
 
 	################# Hardcoded #################################
     print("--Get Suites API Called--");
@@ -209,15 +353,21 @@ if __name__=='__main__':
     print("--Get Suites API Finished--");
 
     print("--Suites Load to Snowflake Started--");
-    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeSuiteTable,vDFSuiteList);
+    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeObjectMapping.get('Suites')[1],vDFSuiteList);
     print("--Suites Load to Snowflake Finished--");
 
+    print("--Get High Watermark For Cases Started--");
+    vGetHWCases=getHighWatermark(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,'Cases',SnowflakeObjectMapping);
+    print("--Get High Watermark For Cases Finished--");
+
     print("--Get Cases API Called--");
-    vDFCaseList=getCases(vDFSuiteList);
+    vDFCaseList=getCases(vDFSuiteList,vGetHWCases);
     print("--Get Cases API Finished--");
 
     print("--Cases Load to Snowflake Started--");
-    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeCaseTable,vDFCaseList);
+    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeObjectMapping.get('Cases')[1],vDFCaseList);
     print("--Cases Load to Snowflake Finished--");
 
-	
+    print("--Cases Highwatermark Insert Started--");
+    insertHighWatermark(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,'Cases',SnowflakeObjectMapping);
+    print("--Cases Highwatermark Insert Finished--");
