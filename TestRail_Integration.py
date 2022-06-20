@@ -10,7 +10,7 @@ import snowflake.connector.errors
 import sys
 import traceback
 from TestRailCredentials import (User,Password,Host,Database,Schema,Warehouse,Role,TestrailUser,TestrailPassword)
-from TestRailConfigs import (SuiteColumns,CaseColumns,ProjectId,CohesityTestRailBaseURL,ConfigNoOfSuites,APILimit,SnowflakeObjectMapping,TestRailEPochDate)
+from TestRailConfigs import (SuiteColumns,CaseColumns,MilestoneColumns,ProjectId,CohesityTestRailBaseURL,ConfigNoOfSuites,APILimit,SnowflakeObjectMapping,TestRailEPochDate)
 
 snowflake.connector.paramstyle='qmark';
 
@@ -310,6 +310,107 @@ def getCases(vInpDFSuiteList,vHWM):
         print(vGlobalErrorMessage);
         exit(0);
 
+def getMilestones():
+
+    global vTestrailUser;
+    global vTestrailPassword;
+    global vLimit;
+    global vAuth;
+
+    try:
+
+        vDataHeadersConfig={
+            'Content-Type': 'application/json',
+            'Accept-Charset': 'UTF-8',
+            'Authorization': 'Basic '+vAuth
+            };
+
+        vMilestoneCount=0;
+        vListMilestones=[];
+        vColumns = MilestoneColumns;
+
+        vCount=0;
+
+        while (True):
+
+            vDataURL=CohesityTestRailBaseURL+"get_milestones/"+str(ProjectId);
+            vDataParams={
+                'limit' : vLimit,
+                'offset' : vCount
+                };
+
+            requestDataURL=rqst.get(vDataURL,headers=vDataHeadersConfig,params=vDataParams,verify=False);
+            outputData=requestDataURL.json();
+
+            if (outputData.get('milestones') is None):
+                break;
+
+            vMilestoneCount=vMilestoneCount+len(outputData.get('milestones'));
+
+            for idx,val in enumerate(outputData.get('milestones')):
+
+                vLoopCurrList=[];
+                for j in vColumns:
+                    vLoopCurrList.append(val.get(j));
+
+                vListMilestones.append(vLoopCurrList);
+
+            if (outputData.get('size') < vLimit):
+                break;
+
+            else:
+                vCount+=outputData.get('size');
+
+        dfMilestones = pd.DataFrame(vListMilestones,columns=vColumns);
+        return dfMilestones;
+
+    except:
+
+        vGlobalErrorMessage=traceback.format_exc();
+        print("Exception Encountered");
+        print(vGlobalErrorMessage);
+        exit(0);
+
+
+def getSubMilestones(vInpDfMilestone):
+
+    global vLimit;
+    global vAuth;
+
+    try:
+
+        vListSubMilestones=[];
+        vColumns = MilestoneColumns;
+
+        for j in vInpDfMilestone.get('milestones'):
+
+            if (len(j) > 0):
+
+                for vLoopSubMilestone in j:
+
+                    vLoopCurrList=[];
+                    for j in vColumns:
+                        vLoopCurrList.append(vLoopSubMilestone.get(j));
+
+                    vListSubMilestones.append(vLoopCurrList);
+
+        dfSubMilestones = pd.DataFrame(vListSubMilestones,columns=vColumns);
+        #vInpDfMilestone.drop('milestones',axis=1, inplace = True);
+
+        dfModSubMilestones=pd.concat([vInpDfMilestone, dfSubMilestones], axis=0);
+        dfModSubMilestones.drop('milestones',axis=1, inplace = True);
+
+        return dfModSubMilestones;
+
+
+    except:
+
+        vGlobalErrorMessage=traceback.format_exc();
+        print("Exception Encountered");
+        print(vGlobalErrorMessage);
+        exit(0);
+
+
 if __name__=='__main__':
 
     global vUser;
@@ -348,6 +449,7 @@ if __name__=='__main__':
     vMinEpochTime=TestRailEPochDate;
 
 	################# Hardcoded #################################
+
     print("--Get Suites API Called--");
     vDFSuiteList=getSuites();
     print("--Get Suites API Finished--");
@@ -367,6 +469,19 @@ if __name__=='__main__':
     print("--Cases Load to Snowflake Started--");
     LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeObjectMapping.get('Cases')[1],vDFCaseList);
     print("--Cases Load to Snowflake Finished--");
+
+    print("--Get Milestones API Called--");
+    vDFMilestoneList=getMilestones();
+    print("--Get Milestones API Finished--");
+
+    print("--Generate Sub Milestones Flatten Called--");
+    vDFCombineMilestoneList=getSubMilestones(vDFMilestoneList);
+    print("--Generate Sub Milestones Flatten Finished--");
+
+    print("--Milestones Load to Snowflake Started--");
+    LoadSnowflake(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,SnowflakeObjectMapping.get('Milestones')[1],vDFCombineMilestoneList);
+    print("--Milestones Load to Snowflake Finished--");
+
 
     print("--Cases Highwatermark Insert Started--");
     insertHighWatermark(vUser,vPassword,vHost,vWarehouse,vDatabase,vSchema,vRole,'Cases',SnowflakeObjectMapping);
