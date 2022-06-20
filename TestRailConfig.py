@@ -40,6 +40,23 @@ CaseColumns = [
     'custom_automation_type'
 ];
 
+MilestoneColumns=[
+    'id',
+    'name',
+    'description',
+    'start_on',
+    'started_on',
+    'is_started',
+    'due_on',
+    'is_completed',
+    'completed_on',
+    'project_id',
+    'parent_id',
+    'refs',
+    'url',
+    'milestones'
+];
+
 #Cohesity Project ID For Testrail Integration
 ProjectId=4;
 
@@ -49,7 +66,7 @@ APILimit=250;
 TestRailEPochDate=1000000000;
 
 #No Of Suites to Fetch Data from Testrail
-ConfigNoOfSuites=5;
+ConfigNoOfSuites=2000;
 
 
 # Snowflake Table Names
@@ -61,5 +78,6 @@ SnowflakeCaseTable='TESTRAIL_CASES';
 SnowflakeObjectMapping={
                         'Suites': [1,'TESTRAIL_SUITES'],
                         'Cases': [2,'TESTRAIL_CASES','UPDATED_ON'],
+                        'Milestones' : [3,'TESTRAIL_MILESTONES'],
                         'HighWatermark':['MATILLION_TEMP','TESTRAIL_HIGHWATERMARK']
                         };
